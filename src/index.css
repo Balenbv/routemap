@@ -1,0 +1,20 @@
+.container-opciones{
+    border-bottom: 1px solid #ccc;
+    overflow-y: auto;
+    
+    left: 10%;
+    top: 3%;
+    position: absolute;
+    z-index: 10000;
+    pointer-events:all;
+    width: 20%;
+    height: 10%;
+}
+
+.controls {
+    transition: transform 0.3s ease-in-out;
+    transform: translateY(0);
+  }
+  .controls.hidden {
+    transform: translateY(-100%);
+  }
