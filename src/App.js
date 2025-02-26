@@ -1,100 +1,59 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { MapContainer, TileLayer, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-routing-machine';
 import 'leaflet-routing-machine/dist/leaflet-routing-machine.css';
+import { getUserLocation } from './utils';
 
-// Función para geocodificación directa usando Nominatim (con fetch)
-const geocode = async (query) => {
-  try {
-    const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`
-    );
-    if (!response.ok) {
-      throw new Error('Error en la respuesta de Nominatim');
-    }
-    const data = await response.json();
-    if (data && data.length > 0) {
-      return [parseFloat(data[0].lat), parseFloat(data[0].lon)]; // Retorna [lat, lng]
-    } else {
-      throw new Error('No se encontraron resultados para la ubicación proporcionada.');
-    }
-  } catch (error) {
-    console.error('Error en geocodificación:', error);
-    return null;
-  }
-};
-
-// Componente RoutingMachine
-const RoutingMachine = ({ waypoints }) => {
-  const map = useMap();
-  const routingControlRef = useRef(null); // Referencia para almacenar el control de ruta
-
-  useEffect(() => {
-    if (!waypoints || waypoints.length < 2) return;
-
-    // Eliminar el control de ruta anterior si existe
-    if (routingControlRef.current) {
-      map.removeControl(routingControlRef.current);
-      routingControlRef.current = null;
-    }
-
-    // Crear un plan de ruta con todos los puntos
-    const plan = new L.Routing.Plan(
-      waypoints.map((wp) => L.latLng(wp)),
-      {
-        createMarker: function (i, wp) {
-          return L.marker(wp.latLng, {
-            draggable: false,
-            icon: L.icon({
-              iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-              iconSize: [25, 41],
-              iconAnchor: [12, 41],
-              popupAnchor: [1, -34],
-              shadowSize: [41, 41],
-            }),
-          });
-        },
-      }
-    );
-
-    // Crear un control de ruta con el plan
-    try {
-      routingControlRef.current = L.Routing.control({
-        plan: plan,
-        router: new L.Routing.OSRMv1({
-          serviceUrl: 'https://router.project-osrm.org/route/v1',
-          useHints: false,
-        }),
-        lineOptions: {
-          styles: [{ color: 'blue', weight: 4 }],
-        },
-        show: false, // No mostrar el panel de instrucciones
-      }).addTo(map);
-    } catch (error) {
-      console.error('Error al crear el control de ruta:', error);
-    }
-
-    // Limpiar el control de ruta al desmontar el componente o actualizar los waypoints
-    return () => {
-      if (routingControlRef.current) {
-        map.removeControl(routingControlRef.current);
-        routingControlRef.current = null; // Limpiar la referencia
-      }
-    };
-  }, [map, waypoints]);
-
-  return null;
-};
-
-// Componente principal Map
 function Map() {
+  const [location, setLocation] = useState(null);
+  const [error, setError] = useState(null);
   const [locations, setLocations] = useState(['', '']); // Lista de ubicaciones
   const [waypoints, setWaypoints] = useState([]); // Coordenadas de las ubicaciones
-  const [error, setError] = useState(''); // Mensaje de error
   const [showControls, setShowControls] = useState(true); // Estado para mostrar/ocultar controles
   const [isLoading, setIsLoading] = useState(false); // Indicador de carga
+
+  useEffect(() => {
+    const fetchLocation = async () => {
+      try {
+        const loc = await getUserLocation();
+        console.log('User location:', loc); // Mostrar la ubicación del usuario en la consola
+        setLocation(loc);
+      } catch (err) {
+        setError(err.message);
+      }
+    };
+
+    fetchLocation();
+
+    if ('geolocation' in navigator) {
+      const watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          const loc = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          };
+          console.log('Updated user location:', loc); // Mostrar la ubicación actualizada del usuario en la consola
+          setLocation(loc);
+        },
+        (err) => {
+          setError(`Error al obtener la ubicación: ${err.message}`);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 5000,
+          maximumAge: 0,
+        }
+      );
+
+      return () => {
+        navigator.geolocation.clearWatch(watchId);
+      };
+    } else {
+      setError('La geolocalización no está soportada por este navegador.');
+    }
+  }, []);
 
   const handleAddLocation = () => {
     setLocations([...locations, '']); // Agrega un nuevo input vacío
@@ -213,16 +172,104 @@ function Map() {
 
       {/* Mapa */}
       <div style={{ flex: 1, position: 'relative' }}>
-        <MapContainer center={[-38.9516, -68.0591]} zoom={13} style={{ height: '100%', width: '100%' }}>
-          <TileLayer
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          />
-          {waypoints.length >= 2 && <RoutingMachine waypoints={waypoints} />}
-        </MapContainer>
+        {location ? (
+          <MapContainer center={[location.latitude, location.longitude]} zoom={13} style={{ height: '100%', width: '100%' }}>
+            <TileLayer
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            />
+            <Marker position={[location.latitude, location.longitude]} />
+            {waypoints.length >= 2 && <RoutingMachine waypoints={waypoints} />}
+          </MapContainer>
+        ) : (
+          <p>Fetching location...</p>
+        )}
       </div>
     </div>
   );
 }
+
+// Función para geocodificación directa usando Nominatim (con fetch)
+const geocode = async (query) => {
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`
+    );
+    if (!response.ok) {
+      throw new Error('Error en la respuesta de Nominatim');
+    }
+    const data = await response.json();
+    if (data && data.length > 0) {
+      return [parseFloat(data[0].lat), parseFloat(data[0].lon)]; // Retorna [lat, lng]
+    } else {
+      throw new Error('No se encontraron resultados para la ubicación proporcionada.');
+    }
+  } catch (error) {
+    console.error('Error en geocodificación:', error);
+    return null;
+  }
+};
+
+// Componente RoutingMachine
+const RoutingMachine = ({ waypoints }) => {
+  const map = useMap();
+  const routingControlRef = useRef(null); // Referencia para almacenar el control de ruta
+
+  useEffect(() => {
+    if (!waypoints || waypoints.length < 2) return;
+
+    // Eliminar el control de ruta anterior si existe
+    if (routingControlRef.current) {
+      map.removeControl(routingControlRef.current);
+      routingControlRef.current = null;
+    }
+
+    // Crear un plan de ruta con todos los puntos
+    const plan = new L.Routing.Plan(
+      waypoints.map((wp) => L.latLng(wp)),
+      {
+        createMarker: function (i, wp) {
+          return L.marker(wp.latLng, {
+            draggable: false,
+            icon: L.icon({
+              iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+              iconSize: [25, 41],
+              iconAnchor: [12, 41],
+              popupAnchor: [1, -34],
+              shadowSize: [41, 41],
+            }),
+          });
+        },
+      }
+    );
+
+    // Crear un control de ruta con el plan
+    try {
+      routingControlRef.current = L.Routing.control({
+        plan: plan,
+        router: new L.Routing.OSRMv1({
+          serviceUrl: 'https://router.project-osrm.org/route/v1',
+          useHints: false,
+        }),
+        lineOptions: {
+          styles: [{ color: 'blue', weight: 4 }],
+        },
+        show: false, // No mostrar el panel de instrucciones
+      }).addTo(map);
+    } catch (error) {
+      console.error('Error al crear el control de ruta:', error);
+    }
+
+    // Limpiar el control de ruta al desmontar el componente o actualizar los waypoints
+    return () => {
+      if (routingControlRef.current) {
+        map.removeControl(routingControlRef.current);
+        routingControlRef.current = null; // Limpiar la referencia
+      }
+    };
+  }, [map, waypoints]);
+
+  return null;
+};
 
 export default Map;
